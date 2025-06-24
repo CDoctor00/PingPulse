@@ -55,11 +55,18 @@ func dfsPing(root *types.TreeNode, isParentConnected bool) error {
 			Valid:  true,
 			String: pingTime,
 		}
+
+		if root.Value.Status == "off" {
+			root.Value.Notified = false
+		}
+
 		root.Value.Status = "on"
-		root.Value.Notified = false
 	} else {
 		root.Value.AverageLatency = ((root.Value.AverageLatency * (root.Value.PingsCount - 1)) + avgLatency) / root.Value.PingsCount
 		root.Value.DisconnectionCount++
+		if root.Value.Status == "on" {
+			root.Value.Notified = false
+		}
 		root.Value.Status = "off"
 	}
 
@@ -88,31 +95,38 @@ func createMessage(root *types.TreeNode, msgPrefix string) (string, error) {
 		message = message + childMessage
 	}
 
-	if root.Value.Status == "off" && !root.Value.Notified {
-		timePing, errPing := time.Parse(time.RFC3339, root.Value.LastPing.String)
-		timePulse, errPulse := time.Parse(time.RFC3339, root.Value.LastPulse.String)
-		if errPing != nil || errPulse != nil {
-			return message,
-				fmt.Errorf("service.createMessage: (Ping: %w) - (Pulse: %w)", errPing, errPulse)
-		}
-		timeDifference := int(timePing.Sub(timePulse).Minutes())
+	var status = "ON"
 
-		if timeDifference > 1 {
-			root.Value.Notified = true
-
-			if len(root.Children) == 0 {
-				return fmt.Sprintf("\n%s• %s (%s): OFF for %d minutes", msgPrefix,
-					root.Value.Name, root.Value.IPAddress, timeDifference), nil
+	if !root.Value.Notified {
+		if root.Value.Status == "off" {
+			timePing, errPing := time.Parse(time.RFC3339, root.Value.LastPing.String)
+			timePulse, errPulse := time.Parse(time.RFC3339, root.Value.LastPulse.String)
+			if errPing != nil || errPulse != nil {
+				return message,
+					fmt.Errorf("service.createMessage: (Ping: %w) - (Pulse: %w)", errPing, errPulse)
 			}
+			timeDifference := int(timePing.Sub(timePulse).Minutes())
 
-			message = fmt.Sprintf("\n%s• %s (%s): OFF for %d minutes %s", msgPrefix,
-				root.Value.Name, root.Value.IPAddress, timeDifference, message)
+			if timeDifference > 1 {
+				root.Value.Notified = true
+
+				if len(root.Children) == 0 {
+					return fmt.Sprintf("\n%s• %s (%s): OFF for %d minutes", msgPrefix,
+						root.Value.Name, root.Value.IPAddress, timeDifference), nil
+				}
+
+				message = fmt.Sprintf("\n%s• %s (%s): OFF for %d minutes %s", msgPrefix,
+					root.Value.Name, root.Value.IPAddress, timeDifference, message)
+			}
+		} else {
+			status = "RECONNECTED"
+			root.Value.Notified = true
 		}
-	} else {
-		if message != "" {
-			message = fmt.Sprintf("\n%s• %s (%s): ON %s", msgPrefix,
-				root.Value.Name, root.Value.IPAddress, message)
-		}
+	}
+
+	if message != "" || status == "RECONNECTED" {
+		message = fmt.Sprintf("\n%s• %s (%s): %s %s", msgPrefix,
+			root.Value.Name, root.Value.IPAddress, status, message)
 	}
 
 	return message, nil
